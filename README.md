@@ -2,15 +2,33 @@
 
 ## Installation
 
-1. Download the latest executable from the [Releases](https://github.com/Nico-Siringoringo/Bahasa-Programming-Language/releases) page.
-2. Place the executable in your project directory or add it to your system's PATH.
+1. Download the appropriate executable from the release assets.
+2. Place the executable in your project directory.
 
 ## Usage
 
-Run your `.john` source file with:
+Run a `.john` file with:
 
+### Linux
 ```bash
 ./john <your-file>.john
+```
+
+Example:
+
+```bash
+./john main.john
+```
+
+### Windows
+```bash
+john.exe <your-file>.john
+```
+
+Example:
+
+```bash
+john.exe main.john
 ```
 
 ## Documentation
