@@ -14,11 +14,7 @@ class Lexer:
         self.__read_char()
 
     def __read_char(self) -> None:
-        if self.read_position >= len(self.source):
-            self.current_char = None
-        else:
-            self.current_char = self.source[self.read_position]
-
+        self.current_char = self.__peek_char()
         self.position = self.read_position
         self.read_position += 1
 
@@ -29,20 +25,23 @@ class Lexer:
         return self.source[self.read_position]
 
     def __skip_whitespace(self) -> None:
-        while self.current_char in [' ', '\t', '\n', '\r']:
-            if self.current_char == '\n':
+        while self.current_char is not None and self.current_char.isspace():
+            if self.current_char in ('\n', '\r'):
                 self.line_no += 1
 
             self.__read_char()
 
     def __new_token(self, tt: TokenType, literal: Any) -> Token:
-        return Token(type=tt, literal=literal, line_no=self.line_no, position=self.position)
+        return Token(type=tt,
+                     literal=literal,
+                     line_no=self.line_no,
+                     position=self.position)
 
-    def __is_digit(self, ch: str) -> bool:
-        return '0' <= ch and ch <= '9'
-    
-    def __is_letter(self, ch: str) -> bool:
-        return 'a' <= ch and ch <= 'z' or 'A' <= ch and ch <= 'Z' or ch == '_'
+    def __is_digit(self, ch: str | None) -> bool:
+        return ch is not None and '0' <= ch <= '9'
+
+    def __is_letter(self, ch: str | None) -> bool:
+        return ch is not None and ('a' <= ch <= 'z' or 'A' <= ch <= 'Z' or ch == '_')
     
     def __read_number(self) -> Token:
         start_pos: int = self.position
@@ -54,7 +53,7 @@ class Lexer:
                 dot_cnt += 1
 
             if dot_cnt > 1:
-                print(f"Too many decimals in number on line {self.line_no}, position {self.position}")
+                print(f"Terlalu banyak desimal di angka pada baris {self.line_no}, posisi {self.position}")
                 return self.__new_token(TokenType.ILLEGAL, self.source[start_pos:self.position])
             
             output += self.source[self.position]
@@ -75,7 +74,7 @@ class Lexer:
         return self.source[position:self.position]
 
     def next_token(self) -> Token:
-        tok: Token = None
+        tok: Token
         
         self.__skip_whitespace()
 
