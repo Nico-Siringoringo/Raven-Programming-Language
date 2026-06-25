@@ -12,7 +12,7 @@ from ctypes import CFUNCTYPE, c_int, c_float, c_bool
 
 def parse_arguments() -> Namespace:
     arg_parser: ArgumentParser = ArgumentParser(
-        description="JohnLang v0.1.0-alpha"
+        description="Bahasa v0.2.0-alpha"
     )
 
     arg_parser.add_argument("file_path", type=str, help="Path to your entry point john file (ex. `main.john`)")

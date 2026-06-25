@@ -114,6 +114,7 @@ ALT_KEYWORDS: dict[str, TokenType] = {
     "pakai": TokenType.IMPORT
 }
 
+BUILTIN_FUNCTION = {'int', 'float', 'input', 'print'}
 TYPE_KEYWORDS: list[str] = ["int", "float", "str", "bool", "void", "bb", "des", "teks"]
 
 def lookup_ident(ident: str) -> TokenType:
@@ -125,7 +126,9 @@ def lookup_ident(ident: str) -> TokenType:
     if tt is not None:
         return tt
 
-    if ident in TYPE_KEYWORDS:
+    if ident in BUILTIN_FUNCTION:
+        return TokenType.IDENT
+    elif ident in TYPE_KEYWORDS:
         return TokenType.TYPE
     
     return TokenType.IDENT

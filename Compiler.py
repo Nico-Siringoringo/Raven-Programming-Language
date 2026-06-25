@@ -46,14 +46,6 @@ class Compiler:
         self.global_parsed_packages: dict[str, Program] = {}
 
     def __initialize_builtins(self) -> None:
-        def __init_print() -> ir.Function:
-            fnty: ir.FunctionType = ir.FunctionType(
-                self.type_map['int'],
-                [ir.IntType(8).as_pointer()],
-                var_arg=True
-            )
-            return ir.Function(self.module, fnty, 'printf')
-
         def __init_booleans() -> tuple[ir.GlobalVariable, ir.GlobalVariable]:
             bool_type: ir.Type = self.type_map['bool']
 
@@ -67,7 +59,36 @@ class Compiler:
 
             return true_var, false_var
         
-        self.env.define('print', __init_print(), ir.IntType(32))
+        # init print
+        print_ty = ir.FunctionType(self.type_map['int'], [ir.IntType(8).as_pointer()], var_arg=True)
+        print_fn = ir.Function(self.module, print_ty, 'printf')
+        self.env.define('print', print_fn, ir.IntType(32))
+
+        # Init fgets
+        fgets_ty = ir.FunctionType(ir.IntType(8).as_pointer(), [ir.IntType(8).as_pointer(), ir.IntType(32), ir.IntType(8).as_pointer()])
+        fgets_fn = ir.Function(self.module, fgets_ty, 'fgets')
+        self.env.define('fgets', fgets_fn, ir.IntType(8).as_pointer())
+
+        # init sscanf
+        sscanf_ty = ir.FunctionType(ir.IntType(32), 
+                                    [ir.IntType(8).as_pointer(), ir.IntType(8).as_pointer()],
+                                    var_arg=True)
+        sscanf_fn = ir.Function(self.module, sscanf_ty, 'sscanf')
+        self.env.define('sscanf', sscanf_fn, ir.IntType(32))
+
+        # init strlen
+        strlen_ty = ir.FunctionType(ir.IntType(64), [ir.IntType(8).as_pointer()])
+        strlen_fn = ir.Function(self.module, strlen_ty, 'strlen')
+        self.env.define('strlen', strlen_fn, ir.IntType(64))
+
+        # stdin
+        stdin_var = ir.GlobalVariable(self.module, ir.IntType(8).as_pointer(), 'stdin')
+        stdin_var.linkage = 'external'
+
+        # init function input(), int(), float()
+        self.env.define('input', None, ir.IntType(8).as_pointer())
+        self.env.define('int', None, ir.IntType(32))
+        self.env.define('float', None, ir.FloatType())
 
         true_var, false_var = __init_booleans()
         self.env.define('true', true_var, true_var.type)
@@ -475,8 +496,14 @@ class Compiler:
         match name:
             # TODO Change to 'cetak'
             case 'print':
-                ret = self.builtin_print(params=args, return_type=types[0])
+                ret = self.builtin_print(params=args, return_type=types)
                 ret_type = self.type_map['int']
+            case 'input':
+                ret, ret_type = self.builtin_input(params=args)
+            case 'int':
+                ret, ret_type = self.builtin_int(params=args, param_types=types)
+            case 'float':
+                ret, ret_type = self.builtin_float(params=args, param_types=types)
             case _:
                 func, ret_type = self.env.lookup(name)
                 ret = self.builder.call(func, args)
@@ -589,24 +616,31 @@ class Compiler:
 
         return global_fmt, global_fmt.type
 
+    def __get_string_ptr(self, param) -> ir.Value:
+        if isinstance(param, ir.LoadInstr):
+            gv = param.operands[0]
+            return self.builder.bitcast(gv, ir.IntType(8).as_pointer())
+        return self.builder.bitcast(param, ir.IntType(8).as_pointer())
+
     def builtin_print(self, params: list[ir.Instruction], return_type: ir.Type) -> None:
         func, _ = self.env.lookup('print')
-
-        if isinstance(return_type, ir.PointerType) or isinstance(return_type, ir.ArrayType):
-            if isinstance(params[0], ir.LoadInstr):
-                c_fmt: ir.LoadInstr = params[0]
-                g_var_ptr = c_fmt.operands[0]
-                string_val = self.builder.load(g_var_ptr)
-                fmt_arg = self.builder.bitcast(string_val, ir.IntType(8).as_pointer())
-            else:
-                fmt_arg = self.builder.bitcast(self.module.get_global(f"__str__{self.counter}"), ir.IntType(8).as_pointer())
-            return self.builder.call(func, [fmt_arg, *params[1:]])
         
         fmt_parts = []
         fixed_args = []
 
-        for param, p_type in zip(params, [return_type] + [p.type for p in params[1:]]):
-            if isinstance(p_type, ir.IntType):
+        for param, p_type in zip(params, return_type):
+            if isinstance(p_type, ir.PointerType) or isinstance(p_type, ir.ArrayType):
+                if isinstance(param, ir.LoadInstr):
+                    g_val_ptr = param.operands[0]
+                    string_val = self.builder.load(g_val_ptr)
+                    arg = self.builder.bitcast(string_val, ir.IntType(8).as_pointer())
+                elif isinstance(param.type, ir.ArrayType):
+                    arg = self.builder.bitcast(self.module.get_global(f"__str_{self.counter}"), ir.IntType(8).as_pointer())
+                else:
+                    arg = param
+                fmt_parts.append("%s")
+                fixed_args.append(arg)
+            elif isinstance(p_type, ir.IntType):
                 if p_type.width == 1:
                     fmt_parts.append("%d")
                     fixed_args.append(self.builder.zext(param, ir.IntType(32)))
@@ -616,8 +650,8 @@ class Compiler:
             elif isinstance(p_type, ir.FloatType):
                 fmt_parts.append("%f")
                 fixed_args.append(self.builder.fpext(param, ir.DoubleType()))
-            elif isinstance(p_type, ir.PointerType) or isinstance(p_type, ir.ArrayType):
-                fmt_parts.append("%s")
+            elif isinstance(p_type, ir.DoubleType):
+                fmt_parts.append("%f")
                 fixed_args.append(param)
             else:
                 fmt_parts.append("%p")
@@ -632,4 +666,91 @@ class Compiler:
 
         fmt_arg = self.builder.bitcast(global_fmt, ir.IntType(8).as_pointer())
         return self.builder.call(func, [fmt_arg, *fixed_args])
+    
+    def builtin_input(self, params: list) -> tuple:
+        printf_func, _ = self.env.lookup('print')
+        fgets_func, _ = self.env.lookup('fgets')
+        strlen_func, _ = self.env.lookup('strlen')
+
+        # If print function in input
+        if params:
+            prompt_ptr = self.__get_string_ptr(params[0])
+            fmt_s = "%s\0"
+            c_fmt = ir.Constant(ir.ArrayType(ir.IntType(8), len(fmt_s)),
+                                bytearray(fmt_s.encode()))
+            gfmt = ir.GlobalVariable(self.module, c_fmt.type, name=f'__input_pfmt_{self.__increment_counter()}')
+            gfmt.linkage = 'internal'
+            gfmt.global_constant = True
+            gfmt.initializer = c_fmt
+            fmt_arg = self.builder.bitcast(gfmt, ir.IntType(8).as_pointer())
+            self.builder.call(printf_func, [fmt_arg, prompt_ptr])
+
+        # Allocate buffer
+        buf_type = ir.ArrayType(ir.IntType(8), 256)
+        buf = self.builder.alloca(buf_type, name='input_buf')
+        buf_ptr = self.builder.bitcast(buf, ir.IntType(8).as_pointer())
+
+        # fgets(buf, 256, stdin)
+        stdin_global = self.module.get_global('stdin')
+        stdin_val = self.builder.load(stdin_global)
+        self.builder.call(fgets_func, [buf_ptr, ir.Constant(ir.IntType(32), 256), stdin_val])
+
+        # strip '\n'
+        str_len = self.builder.call(strlen_func, [buf_ptr])
+        last_idx = self.builder.sub(str_len, ir.Constant(ir.IntType(64), 1))
+        last_ptr = self.builder.gep(buf_ptr, [last_idx], inbounds=True)
+        self.builder.store(ir.Constant(ir.IntType(8), 0), last_ptr)
+
+        return buf_ptr, ir.IntType(8).as_pointer()
+    
+    def builtin_int(self, params: list, param_types: list) -> tuple:
+        sscanf_func, _ = self.env.lookup('sscanf')
+
+        src_type = param_types[0]
+        src_val = params[0]
+
+        if isinstance(src_type, ir.IntType) and src_type.width == 32:
+            return src_val, ir.IntType(32)
+        
+        if isinstance(src_type, ir.FloatType):
+            return self.builder.fptosi(src_val, ir.IntType(32)), ir.IntType(32)
+        
+        # str -> int
+        fmt = "%d\0"
+        c_fmt = ir.Constant(ir.ArrayType(ir.IntType(8), len(fmt)), bytearray(fmt.encode()))
+        gfmt = ir.GlobalVariable(self.module, c_fmt.type, name=f'__int_fmt_{self.__increment_counter()}')
+        gfmt.linkage = 'internal'
+        gfmt.global_constant = True
+        gfmt.initializer = c_fmt
+
+        fmt_ptr = self.builder.bitcast(gfmt, ir.IntType(8).as_pointer())
+        result_ptr = self.builder.alloca(ir.IntType(32), name='parsed_int')
+        self.builder.call(sscanf_func, [src_val, fmt_ptr, result_ptr])
+        return self.builder.load(result_ptr), ir.IntType(32)
+    
+    def builtin_float(self, params: list, param_types: list) -> tuple:
+        sscanf_func, _ = self.env.lookup('sscanf')
+
+        src_type = param_types[0]
+        src_val = params[0]
+
+        if isinstance(src_type, ir.FloatType):
+            return src_val, ir.FloatType()
+        
+        if isinstance(src_type, ir.IntType):
+            return self.builder.sitofp(src_val, ir.FloatType), ir.FloatType()
+        
+        # str -> int
+        fmt = "%d\0"
+        c_fmt = ir.Constant(ir.ArrayType(ir.IntType(8), len(fmt)), bytearray(fmt.encode()))
+        gfmt = ir.GlobalVariable(self.module, c_fmt.type, name=f'__float_fmt_{self.__increment_counter()}')
+        gfmt.linkage = 'internal'
+        gfmt.global_constant = True
+        gfmt.initializer = c_fmt
+
+        fmt_ptr = self.builder.bitcast(gfmt, ir.IntType(8).as_pointer())
+        result_ptr = self.builder.alloca(ir.DoubleType(), name='parsed_double')
+        self.builder.call(sscanf_func, [src_val, fmt_ptr, result_ptr])
+        double_val = self.builder.load(result_ptr)
+        return self.builder.fptrunc(double_val, ir.FloatType()), ir.FloatType()
     # endregion
