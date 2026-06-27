@@ -14,7 +14,7 @@ from Lexer import Lexer
 from Parser import Parser
 
 class Compiler:
-    def __init__(self):
+    def __init__(self, source_file: str = ""):
         self.type_map: dict[str, ir.Type] = {
             'int': ir.IntType(32),
             'float': ir.FloatType(),
@@ -44,6 +44,8 @@ class Compiler:
 
         # Reference to parsed pallets
         self.global_parsed_packages: dict[str, Program] = {}
+
+        self.source_file = source_file
 
     def __initialize_builtins(self) -> None:
         def __init_booleans() -> tuple[ir.GlobalVariable, ir.GlobalVariable]:
@@ -84,6 +86,11 @@ class Compiler:
         # stdin
         stdin_var = ir.GlobalVariable(self.module, ir.IntType(8).as_pointer(), 'stdin')
         stdin_var.linkage = 'external'
+
+        # init pow
+        pow_ty = ir.FunctionType(ir.DoubleType(), [ir.DoubleType(), ir.DoubleType()])
+        pow_fn = ir.Function(self.module, pow_ty, name="pow")
+        self.env.define('pow', pow_fn, ir.DoubleType())
 
         # init function input(), int(), float()
         self.env.define('input', None, ir.IntType(8).as_pointer())
@@ -282,6 +289,14 @@ class Compiler:
                     value = self.builder.srem(ori_value, right_value)
                 else:
                     value = self.builder.frem(ori_value, right_value)
+            case '^=':
+                base = self.builder.sitofp(ori_value, ir.DoubleType())
+                exp = self.builder.sitofp(right_value, ir.DoubleType())
+                if isinstance(ori_value.type, ir.IntType) and isinstance(right_type, ir.IntType):
+                    res, _ = self.builtin_pow(base, exp, ir.DoubleType(), ir.DoubleType())
+                    value = self.builder.fptosi(res, ir.IntType(32))
+                else:
+                    value = self.builtin_pow(base, exp, ir.DoubleType(), ir.DoubleType())
             case _:
                 print("Unsupported Assignment Operator")
 
@@ -384,21 +399,26 @@ class Compiler:
             print(f"[warning]: `{file_path}` is already imported\n")
             return
         
-        with open(os.path.abspath(f"{file_path}"), "r") as f:
+        base_dir = os.path.dirname(os.path.abspath(self.source_file))
+        abs_path = os.path.join(base_dir, file_path)
+
+        if not os.path.exists(abs_path):
+            print(f"error: cannot find imported file '{abs_path}'")
+
+        with open(abs_path, "r") as f:
             package_code: str = f.read()
 
         l: Lexer = Lexer(source=package_code)
         p: Parser = Parser(lexer=l)
-
         program: Program = p.parse_program()
-        if len(p.errors) > 0:
-            print(f"Error with imported package: {file_path}")
+
+        if p.errors:
+            print(f"error with imported package: {file_path}")
             for err in p.errors:
                 print(err)
             exit(1)
 
         self.compile(node=program)
-
         self.global_parsed_packages[file_path] = program
     # endregion
 
@@ -424,8 +444,10 @@ class Compiler:
                 case '%':
                     value = self.builder.srem(left_value, right_value)
                 case '^':
-                    # TODO
-                    pass
+                    l_v = self.builder.sitofp(left_value, ir.DoubleType())
+                    r_v = self.builder.sitofp(right_value, ir.DoubleType())
+                    res, _ = self.builtin_pow(l_v, r_v, ir.DoubleType(), ir.DoubleType())
+                    value = self.builder.fptosi(res, ir.IntType(32))
                 case '<':
                     value = self.builder.icmp_signed('<', left_value, right_value)
                     Type = ir.IntType(1)
@@ -458,8 +480,7 @@ class Compiler:
                 case '%':
                     value = self.builder.frem(left_value, right_value)
                 case '^':
-                    # TODO
-                    pass
+                    value = self.builtin_pow(left_value, right_value, ir.FloatType(), ir.FloatType())
                 case '<':
                     value = self.builder.fcmp_ordered('<', left_value, right_value)
                     Type = ir.IntType(1)
@@ -495,14 +516,14 @@ class Compiler:
 
         match name:
             # TODO Change to 'cetak'
-            case 'print':
+            case 'print' | 'cetak':
                 ret = self.builtin_print(params=args, return_type=types)
                 ret_type = self.type_map['int']
             case 'input':
                 ret, ret_type = self.builtin_input(params=args)
-            case 'int':
+            case 'Int':
                 ret, ret_type = self.builtin_int(params=args, param_types=types)
-            case 'float':
+            case 'Float':
                 ret, ret_type = self.builtin_float(params=args, param_types=types)
             case _:
                 func, ret_type = self.env.lookup(name)
@@ -621,7 +642,10 @@ class Compiler:
             gv = param.operands[0]
             return self.builder.bitcast(gv, ir.IntType(8).as_pointer())
         return self.builder.bitcast(param, ir.IntType(8).as_pointer())
+    
+    # endregion
 
+    # region Builtin Function
     def builtin_print(self, params: list[ir.Instruction], return_type: ir.Type) -> None:
         func, _ = self.env.lookup('print')
         
@@ -753,4 +777,21 @@ class Compiler:
         self.builder.call(sscanf_func, [src_val, fmt_ptr, result_ptr])
         double_val = self.builder.load(result_ptr)
         return self.builder.fptrunc(double_val, ir.FloatType()), ir.FloatType()
+    
+    def builtin_pow(self, base: ir.Value, exp: ir.Value, base_type: ir.Type, exp_type: ir.Type) -> tuple:
+        pow_name = 'pow'
+        if pow_name not in self.module.globals:
+            pow_ty = ir.FunctionType(ir.DoubleType(), [ir.DoubleType(), ir.DoubleType()])
+            pow_fn = ir.Function(self.module, pow_ty, name=pow_name)
+        else:
+            pow_fn = self.module.globals[pow_name]
+
+        if isinstance(base_type, ir.FloatType):
+            base = self.builder.fpext(base, ir.DoubleType())
+        if isinstance(exp_type, ir.FloatType):
+            exp = self.builder.fpext(exp, ir.DoubleType())
+
+        result = self.builder.call(pow_fn, [base, exp])
+
+        return result, ir.DoubleType()
     # endregion

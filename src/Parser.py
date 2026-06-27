@@ -99,7 +99,8 @@ class Parser:
             TokenType.MINUS_EQ,
             TokenType.MUL_EQ,
             TokenType.DIV_EQ,
-            TokenType.MOD_EQ
+            TokenType.MOD_EQ,
+            TokenType.POW_EQ
         ]
 
         return self.peek_token.type in assignment_op
@@ -186,14 +187,6 @@ class Parser:
         
         stmt.name = IdentifierLiteral(value=self.curr_token.literal)
 
-        # if not self.__expect_peek(TokenType.COLON):
-        #     return None
-        
-        # if not self.__expect_peek(TokenType.TYPE):
-        #     return None
-        
-        # stmt.value_type = self.curr_token.literal
-
         if not self.__expect_peek(TokenType.EQ):
             return None
         
@@ -218,7 +211,6 @@ class Parser:
             return None
         
         stmt.parameters = self.__parse_function_parameters()
-        
         
         if not self.__expect_peek(TokenType.ARROW):
             return None

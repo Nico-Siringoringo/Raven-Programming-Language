@@ -28,6 +28,7 @@ class TokenType(Enum):
     MUL_EQ = "MUL_EQ"
     DIV_EQ = "DIV_EQ"
     MOD_EQ = "MOD_EQ"
+    POW_EQ = "POW_EQ"
 
     # Comparison Symbols
     GT = ">"
@@ -85,6 +86,8 @@ class Token:
         return str(self)
     
 KEYWORDS: dict[str, TokenType] = {
+    # English
+
     "let": TokenType.LET,
     "fn": TokenType.FN,
     "return": TokenType.RETURN,
@@ -96,10 +99,10 @@ KEYWORDS: dict[str, TokenType] = {
     "for" : TokenType.FOR,
     "continue" : TokenType.CONTINUE,
     "break" : TokenType.BREAK,
-    "import": TokenType.IMPORT
-}
+    "import": TokenType.IMPORT,
 
-ALT_KEYWORDS: dict[str, TokenType] = {
+    # Indonesia
+
     "misal": TokenType.LET,
     "fungsi": TokenType.FN,
     "kembali": TokenType.RETURN,
@@ -114,13 +117,11 @@ ALT_KEYWORDS: dict[str, TokenType] = {
     "pakai": TokenType.IMPORT
 }
 
-BUILTIN_FUNCTION = {'int', 'float', 'input', 'print'}
+BUILTIN_FUNCTION = {'Int', 'Float', 'input', 'print'}
 TYPE_KEYWORDS: list[str] = ["int", "float", "str", "bool", "void", "bb", "des", "teks"]
 
-COMBINED_KEYWORDS: dict[str, TokenType] = KEYWORDS | ALT_KEYWORDS
-
 def lookup_ident(ident: str) -> TokenType:
-    tt: TokenType | None = COMBINED_KEYWORDS.get(ident)
+    tt: TokenType | None = KEYWORDS.get(ident)
     if tt is not None:
         return tt
 

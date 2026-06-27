@@ -156,7 +156,12 @@ class Lexer:
                 else:
                     tok = self.__new_token(TokenType.BANG, self.current_char)
             case '^':
-                tok = self.__new_token(TokenType.POW, self.current_char)
+                if self.__peek_char() == '=':
+                    ch = self.current_char
+                    self.__read_char()
+                    tok = self.__new_token(TokenType.POW_EQ, ch + self.current_char)
+                else:
+                    tok = self.__new_token(TokenType.POW, self.current_char)
             case ':':
                 tok = self.__new_token(TokenType.COLON, self.current_char)
             case ',':
